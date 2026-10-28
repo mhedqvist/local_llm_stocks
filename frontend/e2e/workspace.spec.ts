@@ -31,11 +31,18 @@ test('workspace journeys: load, toggle, add/close pane, persist symbol', async (
   await expect(first.getByText(fixturePriceText(), { exact: true })).toBeVisible();
   await expect(first.getByText('Live')).toBeVisible();
 
-  // 2. Toggle SMA: the button gains the enabled class.
+  // 2. Toggle SMA on, then off again: the enabled class flips both ways,
+  //  the pane keeps rendering (no per-pane error boundary), and no console
+  //  errors (regression: deselecting used to hit chart.removeSeries with a
+  //  stale series handle after a chart rebuild).
   const sma = first.getByRole('button', { name: 'SMA', exact: true });
   await expect(sma).not.toHaveClass(/bg-emerald-700/);
   await sma.click();
   await expect(sma).toHaveClass(/bg-emerald-700/);
+  await sma.click();
+  await expect(sma).not.toHaveClass(/bg-emerald-700/);
+  await expect(first.getByText(fixturePriceText(), { exact: true })).toBeVisible();
+  await expect(first.getByText(/failed to render/)).toHaveCount(0);
 
   // 3. Add a pane: the second pane renders its own fixture price.
   await page.getByRole('button', { name: '+ Add pane' }).click();

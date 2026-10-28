@@ -238,6 +238,42 @@ export const useStockChart = (
   const updateIndicators = useCallback((data: OHLCV[]) => {
     const chart = chartRef.current;
     if (!chart) return;
+    // Remove any indicator series that no longer matches the config (this
+    // runs on config toggles even before history has loaded, with empty data).
+    if (seriesRef.current.sma && !indicatorsConfig.sma?.enabled) {
+      chart.removeSeries(seriesRef.current.sma);
+      seriesRef.current.sma = undefined;
+    }
+    if (seriesRef.current.ema && !indicatorsConfig.ema?.enabled) {
+      chart.removeSeries(seriesRef.current.ema);
+      seriesRef.current.ema = undefined;
+    }
+    if (seriesRef.current.rsi && !indicatorsConfig.rsi?.enabled) {
+      chart.removeSeries(seriesRef.current.rsi);
+      seriesRef.current.rsi = undefined;
+    }
+    if (!indicatorsConfig.macd?.enabled) {
+      const { macdLine, macdSignal, macdHistogram } = seriesRef.current;
+      if (macdLine) chart.removeSeries(macdLine);
+      if (macdSignal) chart.removeSeries(macdSignal);
+      if (macdHistogram) chart.removeSeries(macdHistogram);
+      seriesRef.current.macdLine = undefined;
+      seriesRef.current.macdSignal = undefined;
+      seriesRef.current.macdHistogram = undefined;
+    }
+    if (!indicatorsConfig.bollingerBands?.enabled) {
+      const { bollingerUpper, bollingerMiddle, bollingerLower } = seriesRef.current;
+      if (bollingerUpper) chart.removeSeries(bollingerUpper);
+      if (bollingerMiddle) chart.removeSeries(bollingerMiddle);
+      if (bollingerLower) chart.removeSeries(bollingerLower);
+      seriesRef.current.bollingerUpper = undefined;
+      seriesRef.current.bollingerMiddle = undefined;
+      seriesRef.current.bollingerLower = undefined;
+    }
+    if (seriesRef.current.volume && !indicatorsConfig.volume?.enabled) {
+      chart.removeSeries(seriesRef.current.volume);
+      seriesRef.current.volume = undefined;
+    }
 
     // 1. SMA
     if (indicatorsConfig.sma?.enabled) {
@@ -368,6 +404,12 @@ export const useStockChart = (
     }
   }, [fetchHistoricalData]);
 
+  // The tick handler always invokes the latest updateIndicators via a ref so
+  // that indicator toggles do not change connectWebSocket's identity (a new
+  // identity would tear down the chart and WebSocket on every toggle).
+  const updateIndicatorsRef = useRef(updateIndicators);
+  updateIndicatorsRef.current = updateIndicators;
+
   const connectWebSocket = useCallback(() => {
     if (wsRef.current) {
       wsRef.current.close();
@@ -405,7 +447,7 @@ export const useStockChart = (
             } else {
               history.push(message.data);
             }
-            updateIndicators(history);
+            updateIndicatorsRef.current(history);
           }
 
           if (firstCandleRef.current) {
@@ -449,7 +491,7 @@ export const useStockChart = (
     ws.onerror = () => {
       setError('WebSocket error occurred');
     };
-  }, [apiBaseUrl, symbol, performGapFilling, updateStatus, updateIndicators]);
+  }, [apiBaseUrl, symbol, performGapFilling, updateStatus]);
 
   // Stale-data detection: on a healthy connection, flag the data as stale
   // when candle updates have been silent for longer than the
@@ -559,8 +601,24 @@ export const useStockChart = (
         chartRef.current.remove();
         chartRef.current = null;
       }
+      // Drop series handles so a rebuild never tries to removeSeries a
+      // series that belonged to the destroyed chart (lightweight-charts
+      // throws "Value is undefined" for that).
+      seriesRef.current = { main: null as any } as any;
+      historyRef.current = [];
     };
-  }, [symbol, apiBaseUrl, resolution, active, initChart, fetchHistoricalData, connectWebSocket, updateStatus, updateIndicators]);
+  }, [symbol, apiBaseUrl, resolution, active, initChart, fetchHistoricalData, connectWebSocket, updateStatus]);
+
+  // Apply indicator config changes without rebuilding the chart: indicator
+  // toggles used to change updateIndicators' identity, which re-ran the main
+  // setup effect (chart teardown + refetch + WS reconnect) and left stale
+  // series handles pointing at the removed chart (lightweight-charts
+  // "Value is undefined" in removeSeries). Now toggles only reconcile the
+  // indicator series against the loaded history.
+  useEffect(() => {
+    if (!chartRef.current) return;
+    updateIndicators(historyRef.current);
+  }, [updateIndicators]);
 
   // Synchronous history apply: whenever a fetch succeeds and bumps
   // historyVersion, push the cached candles into the chart and reset the
