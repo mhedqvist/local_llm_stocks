@@ -49,4 +49,4 @@ This document serves as the technical source of truth for the implementation of 
     * **Auto-Reconnection:** Implement exponential backoff for WebSocket reconnection on the frontend.
     * **Data Integrity:** Logic to handle "gaps" in data (e.g., if a WebSocket disconnects, fetch missing candles via REST upon reconnection).
     * **Error Boundaries:** React error boundaries to prevent UI crashes on data malformation.
-* **Current Status:** `[ ] IN PROGRESS` — exponential backoff reconnection and gap-filling implemented in `useStockChart`; error boundaries and rate-limit UX deferred to Feature 9 (`docs/planning/feature-9-plan.md`).
+* **Current Status:** `[x] DONE` — exponential backoff reconnection, gap-filling (`useStockChart`), error boundaries, and rate-limit UX (429 banner + auto-retry) all implemented and verified in Feature 9 (see `docs/implemented/feature-9.md`).

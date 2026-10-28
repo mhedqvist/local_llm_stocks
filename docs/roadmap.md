@@ -20,15 +20,17 @@ This document outlines the planned features for the Stocker dashboard, transitio
 - [x] Per-pane symbol/resolution/indicator config, persisted workspace layout.
 - See `docs/implemented/feature-8.md`.
 
-## Phase 4: Reliability & Production Readiness
-### Feature 9: QA & Robustness (PLANNED — see `docs/planning/feature-9-plan.md`)
-- Comprehensive unit testing for indicator math.
-- End-to-end (E2E) testing for user flows.
-- Enhanced error handling and reconnection strategies for unstable networks.
+## Phase 4: Reliability & Production Readiness (COMPLETED)
+### Feature 9: QA & Robustness (COMPLETED — see `docs/planning/feature-9-plan.md`)
+- [x] Comprehensive unit testing for indicator math (Vitest, 34 tests).
+- [x] End-to-end (E2E) testing for user flows (Playwright, 3 journeys + perf test).
+- [x] Enhanced error handling and reconnection strategies for unstable networks
+      (error boundaries, stale-data indicator, 429 handling, typed backend exceptions, 20 Hz perf verification).
+- See `docs/implemented/feature-9.md`.
 
 ### Deferred: Customization Engine
 - Theme switching (Dark/Light/High-Contrast).
 - Indicator customization (Color, Thickness, Style).
 
 ---
-*Last updated: Feature 8 complete*
+*Last updated: Feature 9 complete*
