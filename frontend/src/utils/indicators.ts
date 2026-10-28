@@ -102,9 +102,13 @@ export const calculateRSI = (data: OHLCV[], period: number): IndicatorPoint[] =>
   let avgGain = gains / period;
   let avgLoss = losses / period;
 
+  // Guard: a completely flat market (0/0) is neutral, not NaN.
+  const rsiFromAverages = (g: number, l: number): number =>
+    g === 0 && l === 0 ? 50 : 100 - 100 / (1 + g / l);
+
   result.push({
     time: data[period].time,
-    value: 100 - (100 / (1 + avgGain / avgLoss)),
+    value: rsiFromAverages(avgGain, avgLoss),
   });
 
   for (let i = period + 1; i < data.length; i++) {
@@ -115,7 +119,7 @@ export const calculateRSI = (data: OHLCV[], period: number): IndicatorPoint[] =>
     avgGain = (avgGain * (period - 1) + gain) / period;
     avgLoss = (avgLoss * (period - 1) + loss) / period;
 
-    const rsi = 100 - 100 / (1 + avgGain / avgLoss);
+    const rsi = rsiFromAverages(avgGain, avgLoss);
     result.push({
       time: data[i].time,
       value: rsi,
