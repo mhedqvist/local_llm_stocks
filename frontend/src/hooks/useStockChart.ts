@@ -332,7 +332,11 @@ export const useStockChart = (
       wsRef.current.close();
     }
     updateStatus('CONNECTING');
-    const ws = new WebSocket(`ws://${apiBaseUrl.replace(/^http/, 'ws')}/api/ws/${symbol}`);
+    // Derive the WS URL from the HTTP base URL (handles http/https and
+    // avoids a doubled scheme prefix).
+    const url = new URL(apiBaseUrl);
+    const wsScheme = url.protocol === 'https:' ? 'wss:' : 'ws:';
+    const ws = new WebSocket(`${wsScheme}//${url.host}/api/ws/${symbol}`);
     wsRef.current = ws;
 
     ws.onopen = () => {

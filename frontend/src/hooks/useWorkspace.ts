@@ -15,7 +15,7 @@ const LEGACY_INDICATORS_KEY = 'indicators';
 
 /** Seed the workspace from single-chart-era localStorage keys (one-time migration). */
 const migrateFromLegacy = (): WorkspaceState => {
-  let resolution = '1d';
+  let resolution = 'daily';
   let indicators = defaultIndicators();
   try {
     const legacyRes = window.localStorage.getItem(LEGACY_RESOLUTION_KEY);
@@ -55,7 +55,7 @@ export const useWorkspace = () => {
           id: newPaneId(),
           symbol: symbol ?? source.symbol,
           // New panes default to an intraday view for correlation scanning.
-          resolution: source.resolution === '1d' ? '1h' : source.resolution,
+          resolution: source.resolution === 'daily' ? '1h' : source.resolution,
           indicators: defaultIndicators(),
         };
         return { ...ws, panes: [...ws.panes, pane], activePaneId: pane.id };

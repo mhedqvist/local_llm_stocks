@@ -60,6 +60,13 @@ export const normalizeIndicators = (raw: unknown): IndicatorsConfig => {
  * Defensively parse an untrusted localStorage payload into a valid
  * WorkspaceState, or return null if it is unusable.
  */
+// Backend-accepted resolutions (see src/providers/alpha_vantage.py);
+// legacy aliases are normalized to 'daily'.
+const normalizeResolution = (raw: unknown): string => {
+  const r = typeof raw === 'string' ? raw : 'daily';
+  return r === '1d' || r === 'day' || r === 'DAILY' ? 'daily' : r;
+};
+
 export const normalizeWorkspace = (raw: unknown): WorkspaceState | null => {
   if (!raw || typeof raw !== 'object') return null;
   const ws = raw as { panes?: unknown; activePaneId?: unknown };
@@ -70,7 +77,7 @@ export const normalizeWorkspace = (raw: unknown): WorkspaceState | null => {
     .map((p, i) => ({
       id: typeof p.id === 'string' ? p.id : `pane-${i}`,
       symbol: String(p.symbol).toUpperCase(),
-      resolution: typeof p.resolution === 'string' ? p.resolution : '1d',
+      resolution: normalizeResolution(p.resolution),
       indicators: normalizeIndicators(p.indicators),
     }));
 

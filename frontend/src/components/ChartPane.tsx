@@ -20,7 +20,7 @@ interface ChartPaneProps {
   ) => void;
 }
 
-const RESOLUTIONS = ['1m', '5m', '1h', '1d'];
+const RESOLUTIONS = ['1m', '5m', '1h', 'daily'];
 const INDICATOR_LABELS: Record<keyof IndicatorsConfig, string> = {
   sma: 'SMA',
   ema: 'EMA',
