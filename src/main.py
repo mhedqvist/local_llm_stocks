@@ -8,6 +8,7 @@ from typing import Literal, Dict, Tuple
 from dotenv import load_dotenv
 from src.providers.base import BaseDataProvider, BaseStreamProvider
 from src.providers.alpha_vantage import AlphaVantageMCPProvider
+from src.providers.exceptions import RateLimitExceeded, UpstreamError
 from src.providers.mock_provider import MockStreamProvider
 from src.core.connection_manager import ConnectionManager
 from src.services.upstream_manager import UpstreamStreamManager
@@ -82,11 +83,12 @@ async def get_history(
         if "Invalid symbol" in str(e):
             raise HTTPException(status_code=404, detail=str(e))
         raise HTTPException(status_code=400, detail=str(e))
+    except RateLimitExceeded as e:
+        # Retry-After gives the frontend a floor for its 429 backoff.
+        raise HTTPException(status_code=429, detail=str(e), headers={"Retry-After": "15"})
+    except UpstreamError as e:
+        raise HTTPException(status_code=502, detail=str(e))
     except Exception as e:
-        if "Rate Limit" in str(e):
-            raise HTTPException(status_code=429, detail=str(e))
-        if "Network error" in str(e) or "connection" in str(e).lower():
-            raise HTTPException(status_code=502, detail=str(e))
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.websocket("/api/ws/{symbol}")

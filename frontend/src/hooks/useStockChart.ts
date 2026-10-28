@@ -10,6 +10,7 @@ import {
 } from 'lightweight-charts';
 import { OHLCV } from '../types/chart';
 import { ConnectionStatus, WebSocketMessage } from '../types/websocket';
+import { RateLimitError, parseRetryAfterSeconds } from '../utils/errors';
 import * as indicators from '../utils/indicators';
 
 export interface ChartData {
@@ -45,6 +46,26 @@ export interface UseStockChartOptions {
   onChartReady?: (chart: IChartApi, mainSeries: ISeriesApi<'Candlestick'>) => void;
 }
 
+/** Initial-load 429 retry policy: exponential backoff 15/30/60/120/120s, max 5. */
+const MAX_RATE_LIMIT_RETRIES = 5;
+const BASE_RATE_LIMIT_BACKOFF_SECONDS = 15;
+const MAX_RATE_LIMIT_BACKOFF_SECONDS = 120;
+
+/**
+ * Per-resolution "no candle updates" window after which connected data is
+ * considered stale. Sized per Feature 9 plan: short for intraday, long for
+ * daily (a quiet daily session can legitimately go hours without a tick).
+ */
+const STALE_THRESHOLDS_SECONDS: Record<string, number> = {
+  '1m': 300,
+  '5m': 900,
+  '15m': 1800,
+  '60m': 3600,
+  '1h': 3600,
+  daily: 86400,
+};
+const DEFAULT_STALE_THRESHOLD_SECONDS = 900;
+
 // Cast helpers: lightweight-charts requires Time (branded UTCTimestamp | BusinessDay),
 // while the API returns plain unix-timestamp numbers.
 const toCandle = (d: OHLCV): CandlestickData => ({ ...d, time: d.time as UTCTimestamp });
@@ -53,6 +74,14 @@ const toLinePoints = (points: { time: number; value: number }[]): LineData[] =>
   points.map(p => ({ time: p.time as UTCTimestamp, value: p.value }));
 const toHistogramPoints = (points: { time: number; value: number; color?: string }[]): HistogramData[] =>
   points.map(p => ({ time: p.time as UTCTimestamp, value: p.value, color: p.color }));
+
+const KNOWN_STATUSES = new Set<ConnectionStatus>([
+  'CONNECTING',
+  'CONNECTED',
+  'DISCONNECTED',
+  'RECONNECTING',
+  'INACTIVE',
+]);
 
 export const useStockChart = (
   symbol: string, 
@@ -65,6 +94,10 @@ export const useStockChart = (
   const [status, setStatus] = useState<ConnectionStatus>('CONNECTING');
   const [error, setError] = useState<string | null>(null);
   const [currentPrice, setCurrentPrice] = useState<ChartData | null>(null);
+  /** True when the stream is healthy but candle data has stopped flowing. */
+  const [stale, setStale] = useState(false);
+  /** Set while waiting out a rate-limit retry before the next history load. */
+  const [rateLimit, setRateLimit] = useState<{ retryAt: number } | null>(null);
 
   const onChartReadyRef = useRef(options.onChartReady);
   onChartReadyRef.current = options.onChartReady;
@@ -98,6 +131,10 @@ export const useStockChart = (
   const firstCandleRef = useRef<OHLCV | null>(null);
   const historyRef = useRef<OHLCV[]>([]);
   const reconnectAttemptsRef = useRef(0);
+  const reconnectTimerRef = useRef<number | null>(null);
+  const rateLimitRetriesRef = useRef(0);
+  /** Wall-clock time of the last candle update; drives the stale-data check. */
+  const lastTickAtRef = useRef<number>(Date.now());
 
   // Throttle live-price React state to keep high-frequency WS ticks off the
   // render path: chart updates always happen via refs; the header readout
@@ -132,6 +169,14 @@ export const useStockChart = (
     const mappedResolution = resMap[resolution] || resolution;
     
     const response = await fetch(`${apiBaseUrl}/api/history/${symbol}?resolution=${mappedResolution}`);
+    if (response.status === 429) {
+      // Surface as a typed rate-limit error with the provider's Retry-After
+      // honored as a floor (default 15s when the header is absent).
+      throw new RateLimitError(
+        'Rate limited by data provider',
+        parseRetryAfterSeconds(response.headers.get('Retry-After'))
+      );
+    }
     if (!response.ok) {
       throw new Error(`Failed to fetch historical data: ${response.statusText}`);
     }
@@ -313,6 +358,8 @@ export const useStockChart = (
         const { change, changePercentage } = calculateChange(lastClose, firstCandle);
 
         lastPriceRenderRef.current = Date.now();
+        lastTickAtRef.current = Date.now();
+        setStale(false);
         setCurrentPrice({
           price: lastClose,
           timestamp: history[history.length - 1].time,
@@ -323,6 +370,10 @@ export const useStockChart = (
         updateIndicators(history);
       }
     } catch (err) {
+      if (err instanceof RateLimitError) {
+        // Surface the provider's rate limit; reconnects will retry the gap fill.
+        setError('Rate limited by data provider — will retry on reconnect');
+      }
       console.error('Gap filling failed:', err);
     }
   }, [fetchHistoricalData, updateIndicators]);
@@ -351,6 +402,9 @@ export const useStockChart = (
         if (message.type === 'PRICE_UPDATE') {
           seriesRef.current.main.update(toCandle(message.data));
           lastTimestampRef.current = message.data.time;
+          // Candle data is flowing again: reset the stale-data clock.
+          lastTickAtRef.current = Date.now();
+          setStale(false);
           
           // Update history
           const history = historyRef.current;
@@ -374,7 +428,11 @@ export const useStockChart = (
             });
           }
         } else if (message.type === 'SYSTEM_STATUS') {
-          updateStatus(message.status as ConnectionStatus);
+          // Normalize case: the backend broadcasts lowercase status values.
+          const normalized = String(message.status ?? '').toUpperCase() as ConnectionStatus;
+          if (KNOWN_STATUSES.has(normalized)) {
+            updateStatus(normalized);
+          }
         }
       } catch (err) {
         console.error('Error parsing WebSocket message:', err);
@@ -386,10 +444,16 @@ export const useStockChart = (
         updateStatus('DISCONNECTED');
       }
       const timeout = Math.min(1000 * Math.pow(2, reconnectAttemptsRef.current), 30000);
-      setTimeout(() => {
+      // Track the timer so pane teardown can cancel a pending reconnect
+      // (previously this leaked a reconnect chain after unmount).
+      const timerId = window.setTimeout(() => {
+        reconnectTimerRef.current = null;
+        // Skip if this socket was superseded (reconnect or teardown).
+        if (wsRef.current !== ws) return;
         reconnectAttemptsRef.current++;
         connectWebSocket();
       }, timeout);
+      reconnectTimerRef.current = timerId;
     };
 
     ws.onerror = () => {
@@ -397,8 +461,31 @@ export const useStockChart = (
     };
   }, [apiBaseUrl, symbol, performGapFilling, updateStatus, updateIndicators]);
 
+  // Stale-data detection: on a healthy connection, flag the data as stale
+  // when candle updates have been silent for longer than the
+  // per-resolution threshold. Ticks are read from lastTickAtRef so the
+  // interval itself never triggers re-renders without a state change.
+  useEffect(() => {
+    if (!active || status !== 'CONNECTED') return;
+    const thresholdSec = STALE_THRESHOLDS_SECONDS[resolution] ?? DEFAULT_STALE_THRESHOLD_SECONDS;
+    const check = () => {
+      const ageSec = (Date.now() - lastTickAtRef.current) / 1000;
+      const isStale = ageSec > thresholdSec;
+      setStale((prev) => (prev === isStale ? prev : isStale));
+    };
+    check();
+    const id = window.setInterval(check, 2000);
+    return () => window.clearInterval(id);
+  }, [active, status, resolution]);
+
   useEffect(() => {
     let isMounted = true;
+    // Per-load mutable state resets (also abandons pending rate-limit
+    // retries from the previous run; their timeouts check isMounted).
+    rateLimitRetriesRef.current = 0;
+    lastTickAtRef.current = Date.now();
+    setStale(false);
+    setRateLimit(null);
 
     const setup = async () => {
       if (!isMounted) return;
@@ -414,32 +501,66 @@ export const useStockChart = (
         return;
       }
 
-      try {
-        const history = await fetchHistoricalData();
-        if (!isMounted) return;
-        seriesRef.current.main.setData(toCandles(history));
-        if (history.length > 0) {
-          lastTimestampRef.current = history[history.length - 1].time;
-          const firstCandle = history[0];
-          firstCandleRef.current = firstCandle;
-          const currentPrice = history[history.length - 1].close;
-          const { change, changePercentage } = calculateChange(currentPrice, firstCandle);
+      loadHistoryAndConnect().catch(handleLoadError);
+    };
 
-          lastPriceRenderRef.current = Date.now();
-          setCurrentPrice({
-            price: currentPrice,
-            timestamp: history[history.length - 1].time,
-            change,
-            changePercentage
-          });
-          updateIndicators(history);
-        }
-        connectWebSocket();
-      } catch (err: any) {
-        if (isMounted) {
-          setError(err.message || 'Failed to initialize chart data');
+    const loadHistoryAndConnect = async () => {
+      const history = await fetchHistoricalData();
+      if (!isMounted) return;
+      setError(null);
+      seriesRef.current.main.setData(toCandles(history));
+      if (history.length > 0) {
+        lastTimestampRef.current = history[history.length - 1].time;
+        const firstCandle = history[0];
+        firstCandleRef.current = firstCandle;
+        const currentPrice = history[history.length - 1].close;
+        const { change, changePercentage } = calculateChange(currentPrice, firstCandle);
+
+        lastPriceRenderRef.current = Date.now();
+        lastTickAtRef.current = Date.now();
+        setStale(false);
+        setCurrentPrice({
+          price: currentPrice,
+          timestamp: history[history.length - 1].time,
+          change,
+          changePercentage
+        });
+        updateIndicators(history);
+      }
+      connectWebSocket();
+    };
+
+    // Initial-load error handling with 429 auto-retry: exponential backoff
+    // 15/30/60/120/120s (up to 5 retries); a provider Retry-After header
+    // (when present) acts as a floor on each wait. `rateLimit` exposes the
+    // next-retry timestamp to the UI for a countdown readout.
+    const handleLoadError = (err: unknown) => {
+      if (!isMounted) return;
+      if (err instanceof RateLimitError) {
+        rateLimitRetriesRef.current += 1;
+        const attempt = rateLimitRetriesRef.current;
+        if (attempt <= MAX_RATE_LIMIT_RETRIES) {
+          const backoffSec = Math.min(
+            BASE_RATE_LIMIT_BACKOFF_SECONDS * 2 ** Math.min(attempt - 1, 4),
+            MAX_RATE_LIMIT_BACKOFF_SECONDS
+          );
+          const waitSec = Math.max(backoffSec, err.retryAfterSeconds);
           updateStatus('DISCONNECTED');
+          setError('Rate limited by data provider');
+          setRateLimit({ retryAt: Date.now() + waitSec * 1000 });
+          window.setTimeout(() => {
+            if (!isMounted) return;
+            setRateLimit(null);
+            loadHistoryAndConnect().catch(handleLoadError);
+          }, waitSec * 1000);
+        } else {
+          updateStatus('DISCONNECTED');
+          setError('Rate limited by data provider — retries exhausted');
+          setRateLimit(null);
         }
+      } else {
+        setError(err instanceof Error ? err.message : 'Failed to initialize chart data');
+        updateStatus('DISCONNECTED');
       }
     };
 
@@ -450,6 +571,10 @@ export const useStockChart = (
       if (priceTimerRef.current !== null) {
         clearTimeout(priceTimerRef.current);
         priceTimerRef.current = null;
+      }
+      if (reconnectTimerRef.current !== null) {
+        clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = null;
       }
       if (wsRef.current) {
         wsRef.current.close();
@@ -462,5 +587,5 @@ export const useStockChart = (
     };
   }, [symbol, apiBaseUrl, resolution, active, initChart, fetchHistoricalData, connectWebSocket, updateStatus, updateIndicators]);
 
-  return { containerRef, status, error, currentPrice };
+  return { containerRef, status, error, currentPrice, stale, rateLimit };
 };

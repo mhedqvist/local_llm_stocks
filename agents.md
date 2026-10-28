@@ -67,3 +67,19 @@ This document defines the specialized roles (agents) required to build the Stock
     - Frontend Engineer builds the UI and integrates with the backend.
 3. **Verification Phase:** QA Engineer validates against the requirements in `docs/planning/feature-specs.md`.
 4. **Documentation Phase:** All changes to architecture are recorded in `docs/adr/`.
+
+---
+
+## Tool-Use Constraints (Output Token Limits)
+
+Agent tool calls share the model's per-turn output budget. A single `write` call containing a very large file can exceed the limit, get truncated, and silently produce an incomplete file. All agents MUST follow these rules when creating or rewriting files:
+
+- **Cap individual `write` payloads** at roughly 250 lines / 8 KB of file content. Never attempt to emit a whole large file (or a file plus long prose) in one call.
+- **Large file strategy** (anything above the cap):
+    1. `write` the first section, ending with a unique marker line (e.g. `// __NEXT_SECTION__` or `# __NEXT_SECTION__`).
+    2. `edit` to replace the marker with the next section, re-appending the marker at the end, repeating until the file is complete.
+    3. Remove the final marker with one last `edit`.
+    - Alternative for appending: bash heredoc (`cat >> file <<'EOF' ... EOF`), which is fine for script-generated content.
+- **Prefer surgical `edit` calls** over full-file rewrites whenever the change is a small fraction of the file. Rewrite the whole file only when the change is structural.
+- **Verify after every large write/append:** re-read the file tail (or run the build/tests) before proceeding. A truncated write must never be committed.
+- Keep surrounding prose minimal while emitting file content, so the content has room in the output budget.

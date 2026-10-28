@@ -52,13 +52,28 @@ const ChartPane: React.FC<ChartPaneProps> = ({
     []
   );
 
-  const { containerRef, status, error, currentPrice } = useStockChart(
+  const { containerRef, status, error, currentPrice, stale, rateLimit } = useStockChart(
     pane.symbol,
     apiBaseUrl,
     pane.resolution,
     pane.indicators,
     { active: streaming, onChartReady: handleChartReady }
   );
+
+  // 1 Hz countdown clock, active only while a rate-limit retry is pending.
+  const [rateLimitNow, setRateLimitNow] = useState(0);
+  useEffect(() => {
+    if (!rateLimit) return;
+    setRateLimitNow(Date.now());
+    const id = window.setInterval(() => setRateLimitNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, [rateLimit]);
+
+  const rateLimited = Boolean(rateLimit) && Boolean(error?.startsWith('Rate limited'));
+  const errorText = rateLimited
+    ? `Rate limited — retrying in ${Math.max(0, Math.ceil((rateLimit!.retryAt - rateLimitNow) / 1000))}s`
+    : error;
+  const showStale = (stale || status === 'DISCONNECTED' || status === 'RECONNECTING') && streaming;
 
   // Wire this pane into workspace synchronization (crosshair + time scale).
   useEffect(() => {
@@ -209,7 +224,12 @@ const ChartPane: React.FC<ChartPaneProps> = ({
         <span className={isPositive ? 'text-emerald-500' : 'text-rose-500'}>
           {isPositive ? '▲' : '▼'} {Math.abs(currentPrice?.changePercentage ?? 0).toFixed(2)}%
         </span>
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-2">
+          {showStale && (
+            <span className="rounded border border-amber-400/40 bg-amber-400/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-300">
+              Stale
+            </span>
+          )}
           <ConnectionStatusIndicator status={status} />
         </div>
       </div>
@@ -217,9 +237,9 @@ const ChartPane: React.FC<ChartPaneProps> = ({
       {/* Chart */}
       <div className="relative flex-grow">
         <div ref={containerRef} className="absolute inset-0 w-full h-full" />
-        {error && (
-          <div className="absolute top-2 left-2 bg-rose-900/80 text-rose-200 text-xs px-2 py-1 rounded">
-            {error}
+        {errorText && (
+          <div className="absolute top-2 left-2 bg-rose-900/80 text-rose-200 text-xs px-2 py-1 rounded max-w-[80%]">
+            {errorText}
           </div>
         )}
       </div>

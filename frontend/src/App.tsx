@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import WorkspaceGrid from './components/WorkspaceGrid';
 import Watchlist from './components/Watchlist';
+import ErrorBoundary from './components/ErrorBoundary';
 import { useWorkspace } from './hooks/useWorkspace';
 import { useLocalStorage } from './hooks/useLocalStorage';
 
@@ -64,6 +65,22 @@ function App() {
 
       {/* Main Content */}
       <main className="flex-grow flex overflow-hidden">
+        {/* Top-level boundary: workspace-wide render failures get a reload path. */}
+        <ErrorBoundary
+          label="Workspace"
+          fallback={(error) => (
+            <div className="flex flex-1 flex-col items-center justify-center gap-3 rounded-lg border border-rose-900/60 bg-slate-950 p-6 text-sm text-slate-300">
+              <div className="font-semibold text-rose-400">Something went wrong</div>
+              <div className="max-w-md break-words text-center text-xs text-slate-500">{error.message}</div>
+              <button
+                onClick={() => window.location.reload()}
+                className="mt-2 rounded bg-blue-600 px-4 py-2 text-xs font-medium text-white hover:bg-blue-500"
+              >
+                Reload application
+              </button>
+            </div>
+          )}
+        >
         <Watchlist
           symbols={symbols}
           onAdd={addToWatchlist}
@@ -81,6 +98,7 @@ function App() {
             onUpdate={updatePane}
           />
         </div>
+        </ErrorBoundary>
       </main>
     </div>
   );

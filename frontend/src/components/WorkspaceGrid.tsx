@@ -1,6 +1,7 @@
 import React from 'react';
 import { WorkspaceState } from '../types/workspace';
 import ChartPane from './ChartPane';
+import ErrorBoundary from './ErrorBoundary';
 
 interface WorkspaceGridProps {
   workspace: WorkspaceState;
@@ -42,16 +43,18 @@ const WorkspaceGrid: React.FC<WorkspaceGridProps> = ({
       className={`grid ${columnsClass(workspace.panes.length)} gap-3 h-full min-h-0`}
     >
       {workspace.panes.map((pane) => (
-        <ChartPane
-          key={pane.id}
-          pane={pane}
-          isActive={pane.id === workspace.activePaneId}
-          streaming={streaming}
-          apiBaseUrl={apiBaseUrl}
-          onActivate={onActivate}
-          onClose={onClose}
-          onUpdate={onUpdate}
-        />
+        // Per-pane boundary: one broken pane must not crash the workspace.
+        <ErrorBoundary key={pane.id} label={`${pane.symbol} pane`}>
+          <ChartPane
+            pane={pane}
+            isActive={pane.id === workspace.activePaneId}
+            streaming={streaming}
+            apiBaseUrl={apiBaseUrl}
+            onActivate={onActivate}
+            onClose={onClose}
+            onUpdate={onUpdate}
+          />
+        </ErrorBoundary>
       ))}
     </div>
   );

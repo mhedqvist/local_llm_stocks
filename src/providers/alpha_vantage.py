@@ -1,6 +1,7 @@
 import httpx
 from typing import List
 from src.providers.base import BaseDataProvider
+from src.providers.exceptions import RateLimitExceeded, UpstreamError
 from src.models.schemas import ChartDataPoint, AlphaVantagePricePoint
 from src.utils.transformer import transform_alpha_vantage_to_chart_data
 
@@ -41,8 +42,16 @@ class AlphaVantageMCPProvider(BaseDataProvider):
             try:
                 response = await client.get(self.base_url, params=params, timeout=10.0)
                 response.raise_for_status()
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 429:
+                    raise RateLimitExceeded(
+                        f"Alpha Vantage rate limit exceeded: {e.response.text[:200]}"
+                    ) from e
+                raise UpstreamError(
+                    f"Network error while connecting to Alpha Vantage (HTTP {e.response.status_code}): {e}"
+                ) from e
             except httpx.HTTPError as e:
-                raise Exception(f"Network error while connecting to Alpha Vantage: {e}")
+                raise UpstreamError(f"Network error while connecting to Alpha Vantage: {e}") from e
 
         data = response.json()
 
@@ -50,7 +59,7 @@ class AlphaVantageMCPProvider(BaseDataProvider):
         if "Error Message" in data:
             raise ValueError(f"Invalid symbol or API error: {data['Error Message']}")
         if "Note" in data:
-            raise Exception(f"API Rate Limit Exceeded: {data['Note']}")
+            raise RateLimitExceeded(f"API Rate Limit Exceeded: {data['Note']}")
         
         # Find the time series key (e.g., "Time Series (Daily)")
         time_series_key = next((k for k in data.keys() if "Time Series" in k), None)
