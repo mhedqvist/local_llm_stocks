@@ -57,14 +57,14 @@ const MAX_RATE_LIMIT_BACKOFF_SECONDS = 120;
  * daily (a quiet daily session can legitimately go hours without a tick).
  */
 const STALE_THRESHOLDS_SECONDS: Record<string, number> = {
-  '1m': 300,
-  '5m': 900,
-  '15m': 1800,
-  '60m': 3600,
-  '1h': 3600,
-  daily: 86400,
+  '1m': 90,           // 90 s
+  '5m': 600,          // 10 min
+  '15m': 1800,        // 30 min
+  '60m': 5400,        // 90 min
+  '1h': 5400,         // 90 min
+  daily: 86400,       // 24 h
 };
-const DEFAULT_STALE_THRESHOLD_SECONDS = 900;
+const DEFAULT_STALE_THRESHOLD_SECONDS = 300; // 5 min
 
 // Cast helpers: lightweight-charts requires Time (branded UTCTimestamp | BusinessDay),
 // while the API returns plain unix-timestamp numbers.
@@ -98,6 +98,13 @@ export const useStockChart = (
   const [stale, setStale] = useState(false);
   /** Set while waiting out a rate-limit retry before the next history load. */
   const [rateLimit, setRateLimit] = useState<{ retryAt: number } | null>(null);
+  /**
+   * Bumped after every successful history fetch; a synchronous effect below
+   * applies the cached candles to the chart. Running the apply in a sync
+   * effect (not inside the async fetch callback) means a malformed payload
+   * throws during React's commit, where the per-pane ErrorBoundary catches it.
+   */
+  const [historyVersion, setHistoryVersion] = useState(0);
 
   const onChartReadyRef = useRef(options.onChartReady);
   onChartReadyRef.current = options.onChartReady;
@@ -348,35 +355,18 @@ export const useStockChart = (
     try {
       const history = await fetchHistoricalData();
       historyRef.current = history;
-      if (history.length > 0) {
-        seriesRef.current.main.setData(toCandles(history));
-        lastTimestampRef.current = history[history.length - 1].time;
-        
-        const firstCandle = history[0];
-        firstCandleRef.current = firstCandle;
-        const lastClose = history[history.length - 1].close;
-        const { change, changePercentage } = calculateChange(lastClose, firstCandle);
-
-        lastPriceRenderRef.current = Date.now();
-        lastTickAtRef.current = Date.now();
-        setStale(false);
-        setCurrentPrice({
-          price: lastClose,
-          timestamp: history[history.length - 1].time,
-          change,
-          changePercentage
-        });
-
-        updateIndicators(history);
-      }
+      // The sync history-apply effect below picks this up (throws on
+      // malformed payloads, caught by the per-pane ErrorBoundary).
+      setHistoryVersion((v) => v + 1);
     } catch (err) {
       if (err instanceof RateLimitError) {
         // Surface the provider's rate limit; reconnects will retry the gap fill.
+        // (No auto-retry here; the initial-load path owns the retry budget.)
         setError('Rate limited by data provider — will retry on reconnect');
       }
       console.error('Gap filling failed:', err);
     }
-  }, [fetchHistoricalData, updateIndicators]);
+  }, [fetchHistoricalData]);
 
   const connectWebSocket = useCallback(() => {
     if (wsRef.current) {
@@ -508,25 +498,10 @@ export const useStockChart = (
       const history = await fetchHistoricalData();
       if (!isMounted) return;
       setError(null);
-      seriesRef.current.main.setData(toCandles(history));
-      if (history.length > 0) {
-        lastTimestampRef.current = history[history.length - 1].time;
-        const firstCandle = history[0];
-        firstCandleRef.current = firstCandle;
-        const currentPrice = history[history.length - 1].close;
-        const { change, changePercentage } = calculateChange(currentPrice, firstCandle);
-
-        lastPriceRenderRef.current = Date.now();
-        lastTickAtRef.current = Date.now();
-        setStale(false);
-        setCurrentPrice({
-          price: currentPrice,
-          timestamp: history[history.length - 1].time,
-          change,
-          changePercentage
-        });
-        updateIndicators(history);
-      }
+      historyRef.current = history;
+      // The sync history-apply effect below applies the candles to the chart
+      // (so a malformed payload throws in commit, catchable by ErrorBoundary).
+      setHistoryVersion((v) => v + 1);
       connectWebSocket();
     };
 
@@ -586,6 +561,33 @@ export const useStockChart = (
       }
     };
   }, [symbol, apiBaseUrl, resolution, active, initChart, fetchHistoricalData, connectWebSocket, updateStatus, updateIndicators]);
+
+  // Synchronous history apply: whenever a fetch succeeds and bumps
+  // historyVersion, push the cached candles into the chart and reset the
+  // stale/price state. A malformed payload (e.g. a JSON object where an array
+  // is expected) throws here during React's commit, where the per-pane
+  // ErrorBoundary can catch it — unlike throwing inside an async callback.
+  useEffect(() => {
+    if (historyVersion <= 0) return;
+    const history = historyRef.current;
+    if (history.length === 0) return;
+    seriesRef.current.main.setData(toCandles(history));
+    lastTimestampRef.current = history[history.length - 1].time;
+    firstCandleRef.current = history[0];
+    const currentPrice = history[history.length - 1].close;
+    const { change, changePercentage } = calculateChange(currentPrice, history[0]);
+
+    lastPriceRenderRef.current = Date.now();
+    lastTickAtRef.current = Date.now();
+    setStale(false);
+    setCurrentPrice({
+      price: currentPrice,
+      timestamp: history[history.length - 1].time,
+      change,
+      changePercentage
+    });
+    updateIndicators(history);
+  }, [historyVersion, updateIndicators]);
 
   return { containerRef, status, error, currentPrice, stale, rateLimit };
 };
