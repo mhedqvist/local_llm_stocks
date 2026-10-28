@@ -1,0 +1,12 @@
+{
+  "name": "stocker",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Convenience scripts that delegate to the frontend package. Backend runs separately (uvicorn).",
+  "scripts": {
+    "dev": "npm --prefix frontend run dev",
+    "build": "npm --prefix frontend run build",
+    "preview": "npm --prefix frontend run preview",
+    "backend": "uvicorn src.main:app --reload"
+  }
+}
