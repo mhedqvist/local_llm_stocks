@@ -1,5 +1,7 @@
 # Feature 8 Implementation Plan: Multi-Asset Workspace
 
+**Status: COMPLETED** — see `docs/implemented/feature-8.md` (implemented 2026-10-28, commits `8b87806` → `80ae381`).
+
 ## Overview
 Transform the dashboard from a single-chart view into a multi-chart, professional trading
 workspace. A user can open an arbitrary number of independent chart **panes** — each owning its

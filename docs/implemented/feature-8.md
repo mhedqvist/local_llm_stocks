@@ -118,10 +118,38 @@ Key: `stocker.workspace.v1`
   receives `Range<Time> | null`.
 - `autoSize: true` (ResizeObserver) handles container resizes.
 
+## Resolution values
+Panels use only backend-accepted resolutions (`daily, 1h, 1m, 5m, 15m, 60m` — see
+`src/providers/alpha_vantage.py`). The default pane resolution is `daily`; `1d`/`day`/`DAILY`
+found in persisted state are normalized to `daily` by `normalizeResolution()`.
+
+## Post-Implementation Fixes
+Issues found during live browser verification and fixed after the initial commit:
+
+1. **`websockets` dependency missing** (`80ae381`) — uvicorn without a WS library rejects
+   upgrades with 404 ("No supported WebSocket library detected"), so every pane's stream
+   failed in the browser. Added `websockets` to `requirements.txt`; handshake verified with
+   `101 Switching Protocols`.
+2. **Doubled WS scheme prefix** (`3433c2d`) — pre-existing baseline bug: the URL was built as
+   `ws://${apiBaseUrl.replace(/^http/, 'ws')}` (the replace already includes the scheme),
+   producing `ws://ws://localhost:8000/...`. Now derived from `new URL(apiBaseUrl)` with
+   correct `ws:`/`wss:` scheme selection.
+3. **Invalid `1d` resolution** (`3433c2d`) — initial panes defaulted to `1d`, which the backend
+   rejects with 400. Default changed to `daily` and persisted `1d` values are normalized on load.
+4. **Malformed watchlist trash-icon SVG paths** (`3433c2d`) — pre-existing corrupted path data in
+   `WatchlistItem` produced React DOM console errors; icon paths restored.
+
+Also: a root `package.json` was added (`32a1b64`) with convenience scripts delegating to the
+frontend package (`npm run dev|build|preview`) plus `npm run backend` (`uvicorn src.main:app --reload`),
+so the app can be started from the repository root.
+
 ## Verification
 - `npm run build` (tsc + vite) clean.
 - `python -m pytest tests/` → 9/9 passed (backend untouched).
-- Manual checks performed/expected in-browser:
+- Live browser verification (2026-10-28):
+  - `GET /api/history/{symbol}?resolution=daily` → 200 with candle data in every pane.
+  - WS handshake → `101 Switching Protocols`; backend logs "Client connected" / "Starting stream";
+    panes show live "Connected" status and price ticks.
   - Add/remove panes; layout + configs survive reload.
   - Moving the mouse over one pane moves the crosshair in all others; leaving clears it.
   - Zoom/scroll on one pane aligns all panes' time windows with no feedback loop.
