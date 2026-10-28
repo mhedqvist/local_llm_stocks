@@ -8,8 +8,8 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:watch": "vitest"
-
+    "test:watch": "vitest",
+    "e2e": "playwright test"
   },
   "dependencies": {
     "lightweight-charts": "^4.1.1",
@@ -17,6 +17,7 @@
     "react-dom": "^18.2.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.64.1",
     "@tailwindcss/postcss": "^4.0.0",
     "@types/react": "^18.2.55",
     "@types/react-dom": "^18.2.19",

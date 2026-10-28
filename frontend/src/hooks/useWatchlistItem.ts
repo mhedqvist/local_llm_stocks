@@ -43,7 +43,11 @@ export const useWatchlistItem = (symbol: string, apiBaseUrl: string) => {
       wsRef.current.close();
     }
     updateStatus('CONNECTING');
-    const ws = new WebSocket(`ws://${apiBaseUrl.replace(/^http/, 'ws')}/api/ws/${symbol}`);
+    // Derive the WS URL from the base URL's origin (mirrors useStockChart):
+    // a naive `ws://${apiBaseUrl.replace(/^http/, 'ws')}` would produce
+    // `ws://ws://host/...` when the base already includes the scheme.
+    const base = new URL(apiBaseUrl);
+    const ws = new WebSocket(`${base.protocol.replace(/^http/, 'ws')}//${base.host}/api/ws/${symbol}`);
     wsRef.current = ws;
 
     ws.onopen = () => {

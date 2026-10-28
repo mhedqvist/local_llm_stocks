@@ -12,13 +12,19 @@ export function useLocalStorage<T>(key: string, initialValue: T) {
   });
 
   const setValue = (value: T | ((val: T) => T)) => {
-    try {
-      const valueToStore = value instanceof Function ? value(storedValue) : value;
-      setStoredValue(valueToStore);
-      window.localStorage.setItem(key, JSON.stringify(valueToStore));
-    } catch (error) {
-      console.warn(`Error setting localStorage key “${key}”:`, error);
-    }
+    // Resolve functional updates inside the state updater so React feeds
+    // the latest queued state: evaluating against the render-closure
+    // `storedValue` would let a second update in the same tick clobber the
+    // first (e.g. a toolbar toggle + pane activation from one click).
+    setStoredValue((prev) => {
+      const valueToStore = value instanceof Function ? value(prev) : value;
+      try {
+        window.localStorage.setItem(key, JSON.stringify(valueToStore));
+      } catch (error) {
+        console.warn(`Error setting localStorage key “${key}”:`, error);
+      }
+      return valueToStore;
+    });
   };
 
   return [storedValue, setValue] as const;

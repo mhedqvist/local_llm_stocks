@@ -94,8 +94,17 @@ const ChartPane: React.FC<ChartPaneProps> = ({
 
     const unsubRemoteRange = workspaceSync.subscribeTimeRange(paneId, (range, sourceId) => {
       if (sourceId === paneId) return;
+      // Skip charts that cannot map the source's time window (no candles
+      // yet, or a range outside this pane's data window): lightweight-charts
+      // throws `Value is null` in its development build in that case.
+      if (!chart.timeScale().getVisibleRange()) return;
       applyingRemoteRangeRef.current = true;
-      chart.timeScale().setVisibleRange(range);
+      try {
+        chart.timeScale().setVisibleRange(range);
+      } catch {
+        applyingRemoteRangeRef.current = false;
+        return;
+      }
       // The subscription callback fires synchronously during setVisibleRange;
       // clear the flag on the next tick so the echo is suppressed.
       window.setTimeout(() => {
