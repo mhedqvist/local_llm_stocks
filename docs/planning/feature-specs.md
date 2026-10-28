@@ -29,7 +29,7 @@ This document serves as the technical source of truth for the implementation of 
     * **Logic:**
         * **Historical Layer:** Uses `setData()` to render the base candlestick series upon component mount.
         * **Live Layer:** Uses the `.update()` method inside a WebSocket `onmessage` listener to append new data points to the existing series without re-rendering the entire component.
-* **Current Status:** `[ ] TODO`
+* **Current Status:** `[x] COMPLETED`
 
 ## 4. Feature: Dashboard UI & Controls
 **Goal:** Provide a clean, distraction-free interface for stock monitoring.
@@ -40,7 +40,7 @@ This document serves as the technical source of truth for the implementation of 
         * `TickerHeader`: Displays current price, change %, and symbol.
         * `ChartContainer`: The primary viewport for the candlestick series.
         * `ControlBar`: Tools for time-frame selection (1m, 5m, 1h, 1d).
-* **Current Status:** `[ ] TODO`
+* **Current Status:** `[x] COMPLETED`
 
 ## 5. Feature: Robustness & Resilience
 **Goal:** Ensure the application survives network instability and API rate limits.
@@ -49,4 +49,4 @@ This document serves as the technical source of truth for the implementation of 
     * **Auto-Reconnection:** Implement exponential backoff for WebSocket reconnection on the frontend.
     * **Data Integrity:** Logic to handle "gaps" in data (e.g., if a WebSocket disconnects, fetch missing candles via REST upon reconnection).
     * **Error Boundaries:** React error boundaries to prevent UI crashes on data malformation.
-* **Current Status:** `[ ] TODO`
+* **Current Status:** `[ ] IN PROGRESS` — exponential backoff reconnection and gap-filling implemented in `useStockChart`; error boundaries and rate-limit UX deferred to Feature 9 (`docs/planning/feature-9-plan.md`).
