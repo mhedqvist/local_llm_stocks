@@ -1,4 +1,4 @@
-export type ConnectionStatus = 'CONNECTING' | 'CONNECTED' | 'DISCONNECTED' | 'RECONNECTING';
+export type ConnectionStatus = 'CONNECTING' | 'CONNECTED' | 'DISCONNECTED' | 'RECONNECTING' | 'INACTIVE';
 
 export interface PriceUpdateMessage {
   type: 'PRICE_UPDATE';

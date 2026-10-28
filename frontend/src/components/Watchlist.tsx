@@ -6,9 +6,10 @@ interface WatchlistProps {
   onAdd: (symbol: string) => void;
   onRemove: (symbol: string) => void;
   apiBaseUrl: string;
+  onSelect?: (symbol: string) => void;
 }
 
-const Watchlist: React.FC<WatchlistProps> = ({ symbols, onAdd, onRemove, apiBaseUrl }) => {
+const Watchlist: React.FC<WatchlistProps> = ({ symbols, onAdd, onRemove, apiBaseUrl, onSelect }) => {
   const [inputValue, setInputValue] = useState('');
 
   const handleAdd = (e: React.FormEvent) => {
@@ -71,6 +72,7 @@ const Watchlist: React.FC<WatchlistProps> = ({ symbols, onAdd, onRemove, apiBase
                 symbol={symbol}
                 apiBaseUrl={apiBaseUrl}
                 onRemove={onRemove}
+                onClick={onSelect ? () => onSelect(symbol) : undefined}
               />
             ))}
           </div>

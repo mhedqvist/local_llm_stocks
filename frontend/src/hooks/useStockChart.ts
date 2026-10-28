@@ -33,6 +33,18 @@ export interface IndicatorsConfig {
   volume: IndicatorConfig;
 }
 
+export interface UseStockChartOptions {
+  /**
+   * When false, the pane renders its chart shell but does NOT fetch
+   * historical data or open a WebSocket. Flipping back to true re-runs the
+   * full setup (fetch + WS + gap-fill). Used to keep only visible/active
+   * panes streaming.
+   */
+  active?: boolean;
+  /** One-shot callback invoked once the lightweight-charts instance exists. */
+  onChartReady?: (chart: IChartApi, mainSeries: ISeriesApi<'Candlestick'>) => void;
+}
+
 // Cast helpers: lightweight-charts requires Time (branded UTCTimestamp | BusinessDay),
 // while the API returns plain unix-timestamp numbers.
 const toCandle = (d: OHLCV): CandlestickData => ({ ...d, time: d.time as UTCTimestamp });
@@ -46,11 +58,16 @@ export const useStockChart = (
   symbol: string, 
   apiBaseUrl: string, 
   resolution: string = 'daily',
-  indicatorsConfig: Partial<IndicatorsConfig> = {}
+  indicatorsConfig: Partial<IndicatorsConfig> = {},
+  options: UseStockChartOptions = {}
 ) => {
+  const active = options.active !== false;
   const [status, setStatus] = useState<ConnectionStatus>('CONNECTING');
   const [error, setError] = useState<string | null>(null);
   const [currentPrice, setCurrentPrice] = useState<ChartData | null>(null);
+
+  const onChartReadyRef = useRef(options.onChartReady);
+  onChartReadyRef.current = options.onChartReady;
 
   const statusRef = useRef<ConnectionStatus>('CONNECTING');
   const updateStatus = useCallback((newStatus: ConnectionStatus) => {
@@ -81,6 +98,27 @@ export const useStockChart = (
   const firstCandleRef = useRef<OHLCV | null>(null);
   const historyRef = useRef<OHLCV[]>([]);
   const reconnectAttemptsRef = useRef(0);
+
+  // Throttle live-price React state to keep high-frequency WS ticks off the
+  // render path: chart updates always happen via refs; the header readout
+  // re-renders at most ~4x/s with the latest value.
+  const pendingPriceRef = useRef<ChartData | null>(null);
+  const lastPriceRenderRef = useRef(0);
+  const priceTimerRef = useRef<number | null>(null);
+  const schedulePriceRender = useCallback((data: ChartData) => {
+    pendingPriceRef.current = data;
+    const elapsed = Date.now() - lastPriceRenderRef.current;
+    if (elapsed >= 250) {
+      lastPriceRenderRef.current = Date.now();
+      setCurrentPrice(data);
+    } else if (priceTimerRef.current === null) {
+      priceTimerRef.current = window.setTimeout(() => {
+        priceTimerRef.current = null;
+        lastPriceRenderRef.current = Date.now();
+        if (pendingPriceRef.current) setCurrentPrice(pendingPriceRef.current);
+      }, 250 - elapsed);
+    }
+  }, []);
 
   const fetchHistoricalData = useCallback(async (): Promise<OHLCV[]> => {
     const resMap: Record<string, string> = {
@@ -124,7 +162,8 @@ export const useStockChart = (
         timeVisible: true,
         secondsVisible: false,
       },
-    });
+      autoSize: true,
+  });
 
     const mainSeries = chart.addCandlestickSeries({
       upColor: '#22c55e',
@@ -137,11 +176,9 @@ export const useStockChart = (
     chartRef.current = chart;
     seriesRef.current.main = mainSeries;
 
-    window.addEventListener('resize', () => {
-      if (containerRef.current && chartRef.current) {
-        chartRef.current.applyOptions({ width: containerRef.current.clientWidth });
-      }
-    });
+    // Note: autoSize (ResizeObserver) handles container resizes; the width/
+    // height above only serve as a fallback if ResizeObserver is unavailable.
+    onChartReadyRef.current?.(chart, mainSeries);
 
     return { chart, mainSeries };
   }, []);
@@ -272,11 +309,12 @@ export const useStockChart = (
         
         const firstCandle = history[0];
         firstCandleRef.current = firstCandle;
-        const currentPrice = history[history.length - 1].close;
-        const { change, changePercentage } = calculateChange(currentPrice, firstCandle);
+        const lastClose = history[history.length - 1].close;
+        const { change, changePercentage } = calculateChange(lastClose, firstCandle);
 
+        lastPriceRenderRef.current = Date.now();
         setCurrentPrice({
-          price: currentPrice,
+          price: lastClose,
           timestamp: history[history.length - 1].time,
           change,
           changePercentage
@@ -289,7 +327,7 @@ export const useStockChart = (
     }
   }, [fetchHistoricalData, updateIndicators]);
 
-  const connectWebSocket = useCallback(async () => {
+  const connectWebSocket = useCallback(() => {
     if (wsRef.current) {
       wsRef.current.close();
     }
@@ -324,7 +362,7 @@ export const useStockChart = (
 
           if (firstCandleRef.current) {
             const { change, changePercentage } = calculateChange(message.data.close, firstCandleRef.current);
-            setCurrentPrice({
+            schedulePriceRender({
               price: message.data.close,
               timestamp: message.data.time,
               change,
@@ -357,22 +395,24 @@ export const useStockChart = (
 
   useEffect(() => {
     let isMounted = true;
-    const handleResize = () => {
-      if (chartRef.current && containerRef.current) {
-        chartRef.current.applyOptions({ width: containerRef.current.clientWidth });
-      }
-    };
 
     const setup = async () => {
       if (!isMounted) return;
       setError(null);
-      updateStatus('CONNECTING');
+      updateStatus(active ? 'CONNECTING' : 'INACTIVE');
 
       const result = await initChart();
       if (!isMounted || !result) return;
 
+      if (!active) {
+        // Inactive pane: render the chart shell but do not fetch data or
+        // open a WebSocket.
+        return;
+      }
+
       try {
         const history = await fetchHistoricalData();
+        if (!isMounted) return;
         seriesRef.current.main.setData(toCandles(history));
         if (history.length > 0) {
           lastTimestampRef.current = history[history.length - 1].time;
@@ -381,6 +421,7 @@ export const useStockChart = (
           const currentPrice = history[history.length - 1].close;
           const { change, changePercentage } = calculateChange(currentPrice, firstCandle);
 
+          lastPriceRenderRef.current = Date.now();
           setCurrentPrice({
             price: currentPrice,
             timestamp: history[history.length - 1].time,
@@ -399,11 +440,13 @@ export const useStockChart = (
     };
 
     setup();
-    window.addEventListener('resize', handleResize);
 
     return () => {
       isMounted = false;
-      window.removeEventListener('resize', handleResize);
+      if (priceTimerRef.current !== null) {
+        clearTimeout(priceTimerRef.current);
+        priceTimerRef.current = null;
+      }
       if (wsRef.current) {
         wsRef.current.close();
         wsRef.current = null;
@@ -413,7 +456,7 @@ export const useStockChart = (
         chartRef.current = null;
       }
     };
-  }, [symbol, apiBaseUrl, resolution, initChart, fetchHistoricalData, connectWebSocket, updateStatus, updateIndicators]);
+  }, [symbol, apiBaseUrl, resolution, active, initChart, fetchHistoricalData, connectWebSocket, updateStatus, updateIndicators]);
 
   return { containerRef, status, error, currentPrice };
 };

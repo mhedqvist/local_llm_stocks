@@ -13,20 +13,22 @@ This document outlines the planned features for the Stocker dashboard, transitio
 - [x] Feature 6: Watchlist & Persistence
 - [x] Feature 7: Advanced Technical Analysis
 
-## Phase 3: Advanced Workspace & UI
+## Phase 3: Advanced Workspace & UI (COMPLETED)
 ### Feature 8: Multi-Asset Workspace
-- Multi-pane layout for viewing multiple symbols at once.
-- Synchronized crosshairs across all visible charts.
-
-### Feature 9: Customization Engine
-- Theme switching (Dark/Light/High-Contrast).
-- Indicator customization (Color, Thickness, Style).
+- [x] Multi-pane layout for viewing multiple symbols at once.
+- [x] Synchronized crosshairs and time scales across all visible charts.
+- [x] Per-pane symbol/resolution/indicator config, persisted workspace layout.
+- See `docs/implemented/feature-8.md`.
 
 ## Phase 4: Reliability & Production Readiness
-### Feature 10: Quality Assurance & Robustness
+### Feature 9: QA & Robustness (PLANNED — see `docs/planning/feature-9-plan.md`)
 - Comprehensive unit testing for indicator math.
 - End-to-end (E2E) testing for user flows.
 - Enhanced error handling and reconnection strategies for unstable networks.
 
+### Deferred: Customization Engine
+- Theme switching (Dark/Light/High-Contrast).
+- Indicator customization (Color, Thickness, Style).
+
 ---
-*Last updated: 2024*
+*Last updated: Feature 8 complete*

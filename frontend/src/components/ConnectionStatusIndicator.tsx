@@ -11,6 +11,7 @@ const ConnectionStatusIndicator: React.FC<Props> = ({ status }) => {
     'CONNECTED': { color: 'bg-green-500', label: 'Live' },
     'DISCONNECTED': { color: 'bg-red-500', label: 'Disconnected' },
     'RECONNECTING': { color: 'bg-orange-500', label: 'Reconnecting...' },
+    'INACTIVE': { color: 'bg-slate-600', label: 'Paused' },
   };
 
   const config = statusConfig[status] || statusConfig['DISCONNECTED'];
